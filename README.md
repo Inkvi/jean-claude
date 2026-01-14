@@ -1,16 +1,6 @@
-# Jean-Claude
+# JEAN-CLAUDE
 
-```
-       ▄████▄
-      ████████               _ ___   _   _  _      ___ _      _  _   _ ___  ___
-    ██████████████        _ | | __| /_\ | \| |___ / __| |    /_\| | | |   \| __|
-    ███▀▀████▀▀███       | || | _| / _ \| .` |___| (__| |__ / _ \ |_| | |) | _|
-    ██████████████━━●     \__/|___/_/ \_\_|\_|    \___|____/_/ \_\___/|___/|___|
-      ██████████
-      ██      ██
-```
-
-*A companion for syncing Claude Code configuration across machines*
+**A companion for syncing Claude Code configuration across machines**
 
 ## Why?
 
