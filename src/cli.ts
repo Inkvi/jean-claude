@@ -5,7 +5,6 @@ import {
   pullCommand,
   pushCommand,
   statusCommand,
-  doctorCommand,
 } from './commands/index.js';
 import { JeanClaudeError } from './types/index.js';
 import { printLogo } from './utils/logo.js';
@@ -28,7 +27,6 @@ export function createProgram(): Command {
   program.addCommand(pullCommand);
   program.addCommand(pushCommand);
   program.addCommand(statusCommand);
-  program.addCommand(doctorCommand);
 
   return program;
 }
@@ -53,7 +51,7 @@ export async function run(argv: string[]): Promise<void> {
     // Commander errors (like --help, --version)
     if (err && typeof err === 'object' && 'code' in err) {
       const code = (err as { code: string }).code;
-      if (code === 'commander.helpDisplayed' || code === 'commander.version') {
+      if (code === 'commander.helpDisplayed' || code === 'commander.version' || code === 'commander.help') {
         process.exit(0);
       }
     }
