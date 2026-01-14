@@ -2,21 +2,14 @@ import { Command } from 'commander';
 import fs from 'fs-extra';
 import chalk from 'chalk';
 import { logger, formatPath } from '../utils/logger.js';
-import { confirm } from '../utils/prompts.js';
 import { getConfigPaths } from '../lib/paths.js';
-import { isGitRepo, pull, getGitStatus, hasMergeConflicts } from '../lib/git.js';
-import {
-  syncToClaudeConfig,
-  compareFiles,
-  updateLastSync,
-} from '../lib/sync.js';
+import { isGitRepo, pull, getGitStatus, hasMergeConflicts, resetHard } from '../lib/git.js';
+import { syncToClaudeConfig, updateLastSync } from '../lib/sync.js';
 import { JeanClaudeError, ErrorCode } from '../types/index.js';
 
 export const pullCommand = new Command('pull')
   .description('Pull latest config from Git and apply to Claude Code')
-  .option('-f, --force', 'Skip confirmation prompt')
-  .option('--dry-run', 'Show what would change without applying')
-  .action(async (options) => {
+  .action(async () => {
     const { jeanClaudeDir, claudeConfigDir } = getConfigPaths();
 
     // Verify initialized
@@ -36,82 +29,33 @@ export const pullCommand = new Command('pull')
       );
     }
 
-    logger.heading('Pull Configuration');
-
-    // Check for uncommitted changes
+    // Check if remote is configured
     const gitStatus = await getGitStatus(jeanClaudeDir);
-    if (!gitStatus.isClean && !options.force) {
-      logger.warn('You have uncommitted changes in jean-claude config:');
-      logger.list([...gitStatus.modified, ...gitStatus.untracked]);
-      console.log('');
-      const proceed = await confirm('Continue with pull anyway?', false);
-      if (!proceed) {
-        logger.dim('Aborted. Commit or stash your changes first.');
-        return;
-      }
+    if (!gitStatus.remote) {
+      throw new JeanClaudeError(
+        'No remote configured',
+        ErrorCode.NO_REMOTE,
+        'Run "jean-claude init" to set up a remote repository.'
+      );
     }
 
-    // Pull from Git
-    if (gitStatus.remote) {
-      logger.step(1, 2, 'Pulling from Git...');
-      try {
-        const pullResult = await pull(jeanClaudeDir);
-        logger.success(pullResult.message);
-      } catch (err) {
-        if (err instanceof JeanClaudeError && err.code === ErrorCode.MERGE_CONFLICT) {
-          throw err;
-        }
-        throw err;
-      }
+    // Reset any local changes and pull
+    logger.step(1, 2, 'Pulling from Git...');
+    await resetHard(jeanClaudeDir);
+    const pullResult = await pull(jeanClaudeDir);
+    logger.success(pullResult.message);
 
-      // Check for merge conflicts
-      if (await hasMergeConflicts(jeanClaudeDir)) {
-        throw new JeanClaudeError(
-          'Merge conflicts detected',
-          ErrorCode.MERGE_CONFLICT,
-          `Resolve conflicts in ${formatPath(jeanClaudeDir)} and run pull again.`
-        );
-      }
-    } else {
-      logger.dim('No remote configured, skipping git pull.');
+    // Check for merge conflicts (shouldn't happen after reset, but just in case)
+    if (await hasMergeConflicts(jeanClaudeDir)) {
+      throw new JeanClaudeError(
+        'Merge conflicts detected',
+        ErrorCode.MERGE_CONFLICT,
+        `Resolve conflicts in ${formatPath(jeanClaudeDir)} and run pull again.`
+      );
     }
 
-    // Compare files
-    const comparison = compareFiles(jeanClaudeDir, claudeConfigDir);
-    const outOfSync = comparison.filter((c) => !c.inSync && c.sourceExists);
-
-    if (outOfSync.length === 0 && !options.force) {
-      logger.success('Everything is already in sync!');
-      return;
-    }
-
-    // Show what will change
-    if (outOfSync.length > 0) {
-      console.log('');
-      logger.dim('Files to update:');
-      outOfSync.forEach((c) => {
-        const action = c.targetExists ? 'update' : 'create';
-        console.log(`  ${chalk.yellow(action)}  ${c.mapping.target}`);
-      });
-      console.log('');
-    }
-
-    if (options.dryRun) {
-      logger.dim('Dry run - no changes made.');
-      return;
-    }
-
-    // Confirm
-    if (!options.force && outOfSync.length > 0) {
-      const proceed = await confirm('Apply these changes to Claude config?', true);
-      if (!proceed) {
-        logger.dim('Aborted.');
-        return;
-      }
-    }
-
-    // Apply changes
-    logger.step(2, 2, 'Applying configuration...');
+    // Apply to ~/.claude
+    logger.step(2, 2, `Applying to ${formatPath(claudeConfigDir)}...`);
     const results = await syncToClaudeConfig(jeanClaudeDir, claudeConfigDir);
     const applied = results.filter((r) => r.action !== 'skipped');
 
@@ -120,7 +64,7 @@ export const pullCommand = new Command('pull')
 
     // Summary
     console.log('');
-    logger.success(`Applied ${applied.length} file(s) to ${formatPath(claudeConfigDir)}`);
+    logger.success(`Applied ${applied.length} file(s)`);
     applied.forEach((r) => {
       const icon = r.action === 'created' ? chalk.green('+') : chalk.yellow('~');
       console.log(`  ${icon} ${r.file}`);

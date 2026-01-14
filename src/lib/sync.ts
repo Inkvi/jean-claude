@@ -67,6 +67,20 @@ export function compareFiles(
   });
 }
 
+async function listFilesRecursive(dir: string, base: string = ''): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const relativePath = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...await listFilesRecursive(path.join(dir, entry.name), relativePath));
+    } else {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
 export async function syncToClaudeConfig(
   jeanClaudeDir: string,
   claudeConfigDir: string,
@@ -93,22 +107,34 @@ export async function syncToClaudeConfig(
       continue;
     }
 
-    const targetExists = fs.existsSync(targetPath);
-
-    if (!dryRun) {
-      if (mapping.type === 'directory') {
+    if (mapping.type === 'directory') {
+      // List individual files in directory
+      const files = await listFilesRecursive(sourcePath);
+      if (!dryRun) {
         await fs.copy(sourcePath, targetPath, { overwrite: true });
-      } else {
+      }
+      for (const file of files) {
+        const fileTargetPath = path.join(targetPath, file);
+        const fileExists = fs.existsSync(fileTargetPath);
+        results.push({
+          file: `${mapping.source}/${file}`,
+          action: fileExists ? 'updated' : 'created',
+          source: path.join(sourcePath, file),
+          target: fileTargetPath,
+        });
+      }
+    } else {
+      const targetExists = fs.existsSync(targetPath);
+      if (!dryRun) {
         await fs.copy(sourcePath, targetPath);
       }
+      results.push({
+        file: mapping.source,
+        action: targetExists ? 'updated' : 'created',
+        source: sourcePath,
+        target: targetPath,
+      });
     }
-
-    results.push({
-      file: mapping.source,
-      action: targetExists ? 'updated' : 'created',
-      source: sourcePath,
-      target: targetPath,
-    });
   }
 
   return results;

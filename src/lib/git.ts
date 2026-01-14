@@ -49,6 +49,11 @@ export async function initRepo(dir: string): Promise<void> {
   await git.init();
 }
 
+export async function resetHard(dir: string): Promise<void> {
+  const git = createGit(dir);
+  await git.reset(['--hard', 'HEAD']);
+}
+
 export async function getGitStatus(dir: string): Promise<GitStatus> {
   const git = createGit(dir);
 
