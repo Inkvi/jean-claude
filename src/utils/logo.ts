@@ -40,5 +40,6 @@ export function printLogo(): void {
     output.push(paddedIcon[i] + '  ' + o(textLine));
   }
 
-  console.log('\n' + output.join('\n') + '\n');
+  console.log('\n' + output.join('\n'));
+  console.log(g('  A companion for syncing Claude Code configuration\n'));
 }
