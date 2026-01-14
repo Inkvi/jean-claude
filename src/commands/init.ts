@@ -35,8 +35,15 @@ export const initCommand = new Command('init')
       );
     }
 
+    // Explain what's needed
+    console.log('');
+    logger.dim('Jean-Claude needs a Git repository to store your config.');
+    logger.dim('Create an empty repo (e.g. "my-claude-config") on GitHub/GitLab');
+    logger.dim('and paste the URL below.');
+    console.log('');
+
     // Get repository URL
-    const repoUrl = await input('Enter your Git repository URL:');
+    const repoUrl = await input('Repository URL:');
 
     // Test connection to remote
     logger.step(1, 4, 'Testing connection to repository...');
