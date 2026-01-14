@@ -9,7 +9,7 @@ import {
 import { JeanClaudeError } from './types/index.js';
 import { printLogo } from './utils/logo.js';
 
-const VERSION = '1.0.2';
+const VERSION = '1.1.0';
 
 export function createProgram(): Command {
   const program = new Command();
