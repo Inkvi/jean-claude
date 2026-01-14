@@ -1,14 +1,19 @@
 import chalk from 'chalk';
 
 export function printLogo(): void {
+  const o = chalk.hex('#FF6B4A');
+  const r = chalk.red;
+  const w = chalk.white;
+  const g = chalk.gray;
+
   const logo = `
-       ${chalk.red('▄████▄')}
-      ${chalk.red('████████')}
-    ${chalk.hex('#FF6B4A')('██████████████')}
-    ${chalk.hex('#FF6B4A')('███')}${chalk.white('▀▀')}${chalk.hex('#FF6B4A')('████')}${chalk.white('▀▀')}${chalk.hex('#FF6B4A')('███')}
-    ${chalk.hex('#FF6B4A')('██████████████')}${chalk.gray('━━●')}
-      ${chalk.hex('#FF6B4A')('██')}${chalk.white('██████')}${chalk.hex('#FF6B4A')('██')}
-      ${chalk.hex('#FF6B4A')('██')}      ${chalk.hex('#FF6B4A')('██')}
+       ${r('▄████▄')}
+      ${r('████████')}
+    ${o('██████████████')}     ${o('╻┏━╸┏━┓┏┓╻   ┏━╸╻  ┏━┓╻ ╻╺┳┓┏━╸')}
+    ${o('███')}${w('▀▀')}${o('████')}${w('▀▀')}${o('███')}     ${o('┃┣╸ ┣━┫┃┗┫╺━╸┃  ┃  ┣━┫┃ ┃ ┃┃┣╸ ')}
+    ${o('██████████████')}${g('━━●')}  ${o('┗┛┗━╸╹ ╹╹ ╹   ┗━╸┗━╸╹ ╹┗━┛╺┻┛┗━╸')}
+      ${o('██')}${w('██████')}${o('██')}
+      ${o('██')}      ${o('██')}
 `;
   console.log(logo);
 }
