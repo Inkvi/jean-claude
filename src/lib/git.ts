@@ -34,6 +34,16 @@ export async function cloneRepo(url: string, targetDir: string): Promise<void> {
   }
 }
 
+export async function testRemoteConnection(url: string): Promise<boolean> {
+  try {
+    const git = simpleGit();
+    await git.listRemote([url]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function initRepo(dir: string): Promise<void> {
   const git = createGit(dir);
   await git.init();
