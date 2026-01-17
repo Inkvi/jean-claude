@@ -46,17 +46,35 @@ Four commands. No options. No complexity. Just sync.
 
 ### Running Tests
 
-The project includes a comprehensive integration test suite that sets up a local git repository and tests all jean-claude functionality:
+Jean-claude has both unit tests and integration tests:
 
 ```bash
-# Run integration tests
-npm run test:integration
+# Run all tests (unit + integration)
+npm test
 
-# Or run the test script directly
-./test-integration.sh
+# Run only unit tests (fast)
+npm run test:unit
+
+# Run unit tests in watch mode
+npm run test:unit:watch
+
+# Run with coverage report
+npm run test:coverage
+
+# Run only integration tests
+npm run test:integration
 ```
 
-The test suite covers:
+#### Unit Tests
+
+Fast, isolated tests for core logic:
+- File sync and metadata operations
+- Error handling and types
+- Utility functions
+
+#### Integration Tests
+
+End-to-end tests that simulate real usage with a local git repository and multiple machines:
 - **init command**: New repos, existing repos, already initialized, invalid remotes
 - **push command**: Initial files, no changes, modifications, new hooks
 - **pull command**: Basic sync, overwriting local changes, not initialized
@@ -65,7 +83,7 @@ The test suite covers:
 - **Edge cases**: Empty directories, special characters, large files, multiple hooks, concurrent modifications, nested directories
 - **Metadata**: Persistence, timestamp updates
 
-The tests create a temporary environment with a bare git repository and simulate multiple machines, then clean up automatically when done.
+See [tests/README.md](tests/README.md) for more details.
 
 ---
 
