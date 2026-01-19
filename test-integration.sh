@@ -9,6 +9,7 @@
 # - pull command (basic sync, overwriting local changes, not initialized)
 # - status command (clean state, uncommitted changes, not initialized)
 # - Sync scenarios (bidirectional sync between machines)
+# - Multi-repo sync (3 machines: chain sync, convergence, concurrent modifications, hooks/skills sync, late joiner)
 # - Edge cases (empty directories, special characters, large files, multiple hooks, concurrent modifications, nested directories)
 # - Metadata (persistence, timestamp updates)
 #
@@ -35,6 +36,7 @@ TEST_DIR=""
 REMOTE_REPO=""
 MACHINE1_DIR=""
 MACHINE2_DIR=""
+MACHINE3_DIR=""
 JEAN_CLAUDE_BIN=""
 
 # Cleanup function
@@ -148,9 +150,11 @@ setup_test_environment() {
     # Create directories to simulate different machines
     MACHINE1_DIR="$TEST_DIR/machine1"
     MACHINE2_DIR="$TEST_DIR/machine2"
+    MACHINE3_DIR="$TEST_DIR/machine3"
     mkdir -p "$MACHINE1_DIR/.claude"
     mkdir -p "$MACHINE2_DIR/.claude"
-    print_info "Created machine directories"
+    mkdir -p "$MACHINE3_DIR/.claude"
+    print_info "Created machine directories (machine1, machine2, machine3)"
 
     # Build jean-claude
     print_info "Building jean-claude..."
@@ -417,6 +421,313 @@ test_bidirectional_sync() {
     assert_file_exists "$MACHINE1_DIR/.claude/hooks/machine2-hook.sh"
 }
 
+# Multi-repo sync tests (3 machines)
+test_three_machine_init() {
+    print_test "initialize third machine from existing remote"
+
+    # Machine 3 initializes from the same remote
+    echo "$REMOTE_REPO" | run_jean_claude "$MACHINE3_DIR" init
+
+    assert_dir_exists "$MACHINE3_DIR/.claude/.jean-claude"
+    assert_file_exists "$MACHINE3_DIR/.claude/.jean-claude/meta.json"
+
+    # Verify machine 3 has a machine ID (it may be the same as others when
+    # running tests on a single physical machine, since IDs are based on hostname)
+    # Use grep -E to handle pretty-printed JSON with spaces
+    machine3_id=$(grep -oE '"machineId"[[:space:]]*:[[:space:]]*"[^"]*"' "$MACHINE3_DIR/.claude/.jean-claude/meta.json" | sed 's/.*: *"//' | sed 's/"$//')
+
+    if [ -n "$machine3_id" ]; then
+        print_success "Machine 3 has a valid machine ID"
+    else
+        print_failure "Machine 3 does not have a machine ID"
+    fi
+}
+
+test_three_machine_chain_sync() {
+    print_test "chain sync: machine1 -> machine2 -> machine3"
+
+    # Machine 1 creates a unique file in skills (which is synced)
+    mkdir -p "$MACHINE1_DIR/.claude/skills"
+    echo "# Created on Machine 1 for chain sync test" > "$MACHINE1_DIR/.claude/skills/chain-test.md"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 pulls and verifies
+    run_jean_claude "$MACHINE2_DIR" pull
+    assert_file_exists "$MACHINE2_DIR/.claude/skills/chain-test.md"
+
+    # Machine 3 pulls and verifies
+    run_jean_claude "$MACHINE3_DIR" pull
+    assert_file_exists "$MACHINE3_DIR/.claude/skills/chain-test.md"
+
+    # Verify content is the same across all machines
+    if grep -q "Created on Machine 1" "$MACHINE3_DIR/.claude/skills/chain-test.md"; then
+        print_success "Chain sync propagated content to machine 3"
+    else
+        print_failure "Chain sync did not propagate content correctly"
+    fi
+}
+
+test_three_machine_convergence() {
+    print_test "convergence: all 3 machines end up with same state"
+
+    # Machine 1 creates and pushes its file in skills (which is synced)
+    mkdir -p "$MACHINE1_DIR/.claude/skills"
+    echo "# File from Machine 1" > "$MACHINE1_DIR/.claude/skills/from-m1.md"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 pulls (gets m1's file), creates its own file, then pushes
+    run_jean_claude "$MACHINE2_DIR" pull
+    echo "# File from Machine 2" > "$MACHINE2_DIR/.claude/skills/from-m2.md"
+    run_jean_claude "$MACHINE2_DIR" push
+
+    # Machine 3 pulls (gets m1 and m2's files), creates its own file, then pushes
+    run_jean_claude "$MACHINE3_DIR" pull
+    echo "# File from Machine 3" > "$MACHINE3_DIR/.claude/skills/from-m3.md"
+    run_jean_claude "$MACHINE3_DIR" push
+
+    # Final pull on all machines to converge
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Verify all machines have all 3 files
+    local all_synced=true
+    for machine_dir in "$MACHINE1_DIR" "$MACHINE2_DIR" "$MACHINE3_DIR"; do
+        for file in "from-m1.md" "from-m2.md" "from-m3.md"; do
+            if [ ! -f "$machine_dir/.claude/skills/$file" ]; then
+                print_failure "Missing skills/$file on $machine_dir"
+                all_synced=false
+            fi
+        done
+    done
+
+    if [ "$all_synced" = true ]; then
+        print_success "All 3 machines converged to same state"
+    fi
+}
+
+test_three_machine_sequential_modifications() {
+    print_test "sequential modifications across 3 machines"
+
+    # Start with a shared file in skills (which is synced)
+    mkdir -p "$MACHINE1_DIR/.claude/skills"
+    echo "Version 1: From Machine 1" > "$MACHINE1_DIR/.claude/skills/shared-doc.md"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 pulls, modifies, and pushes
+    run_jean_claude "$MACHINE2_DIR" pull
+    echo "Version 2: Modified by Machine 2" > "$MACHINE2_DIR/.claude/skills/shared-doc.md"
+    run_jean_claude "$MACHINE2_DIR" push
+
+    # Machine 3 pulls, modifies, and pushes
+    run_jean_claude "$MACHINE3_DIR" pull
+    echo "Version 3: Modified by Machine 3" > "$MACHINE3_DIR/.claude/skills/shared-doc.md"
+    run_jean_claude "$MACHINE3_DIR" push
+
+    # All machines pull the latest
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Verify all machines have the final version
+    local all_have_v3=true
+    for machine_dir in "$MACHINE1_DIR" "$MACHINE2_DIR" "$MACHINE3_DIR"; do
+        if ! grep -q "Version 3: Modified by Machine 3" "$machine_dir/.claude/skills/shared-doc.md"; then
+            print_failure "Machine at $machine_dir does not have final version"
+            all_have_v3=false
+        fi
+    done
+
+    if [ "$all_have_v3" = true ]; then
+        print_success "Sequential modifications synced correctly across 3 machines"
+    fi
+}
+
+test_three_machine_concurrent_different_files() {
+    print_test "concurrent modifications to different files from 3 machines"
+
+    # Pull latest state first to start clean
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Machine 1 creates its file in skills and pushes
+    mkdir -p "$MACHINE1_DIR/.claude/skills"
+    echo "# Concurrent edit from M1" > "$MACHINE1_DIR/.claude/skills/concurrent-m1.md"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 pulls (gets m1's file), creates its file, pushes
+    run_jean_claude "$MACHINE2_DIR" pull
+    echo "# Concurrent edit from M2" > "$MACHINE2_DIR/.claude/skills/concurrent-m2.md"
+    run_jean_claude "$MACHINE2_DIR" push
+
+    # Machine 3 pulls (gets m1 and m2's files), creates its file, pushes
+    run_jean_claude "$MACHINE3_DIR" pull
+    echo "# Concurrent edit from M3" > "$MACHINE3_DIR/.claude/skills/concurrent-m3.md"
+    run_jean_claude "$MACHINE3_DIR" push
+
+    # Final sync - all machines pull
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Check that all 3 files exist on all machines
+    local all_files_present=true
+    for machine_dir in "$MACHINE1_DIR" "$MACHINE2_DIR" "$MACHINE3_DIR"; do
+        for file in "concurrent-m1.md" "concurrent-m2.md" "concurrent-m3.md"; do
+            if [ ! -f "$machine_dir/.claude/skills/$file" ]; then
+                all_files_present=false
+            fi
+        done
+    done
+
+    if [ "$all_files_present" = true ]; then
+        print_success "Concurrent different-file modifications synced across 3 machines"
+    else
+        print_failure "Some concurrent modifications were lost"
+    fi
+}
+
+test_three_machine_hooks_sync() {
+    print_test "hooks sync across 3 machines"
+
+    # Machine 1 creates hooks
+    mkdir -p "$MACHINE1_DIR/.claude/hooks"
+    echo "#!/bin/bash\necho 'hook from m1'" > "$MACHINE1_DIR/.claude/hooks/m1-hook.sh"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 creates additional hooks
+    run_jean_claude "$MACHINE2_DIR" pull
+    echo "#!/bin/bash\necho 'hook from m2'" > "$MACHINE2_DIR/.claude/hooks/m2-hook.sh"
+    run_jean_claude "$MACHINE2_DIR" push
+
+    # Machine 3 creates additional hooks
+    run_jean_claude "$MACHINE3_DIR" pull
+    echo "#!/bin/bash\necho 'hook from m3'" > "$MACHINE3_DIR/.claude/hooks/m3-hook.sh"
+    run_jean_claude "$MACHINE3_DIR" push
+
+    # Final pull on all machines
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Verify all machines have all hooks
+    local all_hooks_present=true
+    for machine_dir in "$MACHINE1_DIR" "$MACHINE2_DIR" "$MACHINE3_DIR"; do
+        for hook in "m1-hook.sh" "m2-hook.sh" "m3-hook.sh"; do
+            if [ ! -f "$machine_dir/.claude/hooks/$hook" ]; then
+                print_failure "Missing $hook on $machine_dir"
+                all_hooks_present=false
+            fi
+        done
+    done
+
+    if [ "$all_hooks_present" = true ]; then
+        print_success "All hooks synced across 3 machines"
+    fi
+}
+
+test_three_machine_skills_sync() {
+    print_test "skills sync across 3 machines"
+
+    # Machine 1 creates skills
+    mkdir -p "$MACHINE1_DIR/.claude/skills"
+    echo "# Skill from Machine 1" > "$MACHINE1_DIR/.claude/skills/skill-m1.md"
+    run_jean_claude "$MACHINE1_DIR" push
+
+    # Machine 2 creates additional skills
+    run_jean_claude "$MACHINE2_DIR" pull
+    mkdir -p "$MACHINE2_DIR/.claude/skills/nested"
+    echo "# Nested Skill from Machine 2" > "$MACHINE2_DIR/.claude/skills/nested/skill-m2.md"
+    run_jean_claude "$MACHINE2_DIR" push
+
+    # Machine 3 creates additional skills
+    run_jean_claude "$MACHINE3_DIR" pull
+    echo "# Skill from Machine 3" > "$MACHINE3_DIR/.claude/skills/skill-m3.md"
+    run_jean_claude "$MACHINE3_DIR" push
+
+    # Final pull on all machines
+    run_jean_claude "$MACHINE1_DIR" pull
+    run_jean_claude "$MACHINE2_DIR" pull
+    run_jean_claude "$MACHINE3_DIR" pull
+
+    # Verify all machines have all skills
+    local all_skills_present=true
+    for machine_dir in "$MACHINE1_DIR" "$MACHINE2_DIR" "$MACHINE3_DIR"; do
+        if [ ! -f "$machine_dir/.claude/skills/skill-m1.md" ]; then
+            print_failure "Missing skill-m1.md on $machine_dir"
+            all_skills_present=false
+        fi
+        if [ ! -f "$machine_dir/.claude/skills/skill-m3.md" ]; then
+            print_failure "Missing skill-m3.md on $machine_dir"
+            all_skills_present=false
+        fi
+        if [ ! -f "$machine_dir/.claude/skills/nested/skill-m2.md" ]; then
+            print_failure "Missing nested/skill-m2.md on $machine_dir"
+            all_skills_present=false
+        fi
+    done
+
+    if [ "$all_skills_present" = true ]; then
+        print_success "All skills (including nested) synced across 3 machines"
+    fi
+}
+
+test_three_machine_late_joiner() {
+    print_test "late joiner: machine4 joins after machines 1-3 have synced"
+
+    # Create machine4 directory
+    MACHINE4_DIR="$TEST_DIR/machine4"
+    mkdir -p "$MACHINE4_DIR/.claude"
+
+    # Machine4 initializes (joining late)
+    echo "$REMOTE_REPO" | run_jean_claude "$MACHINE4_DIR" init
+
+    # Pull to get all existing content
+    run_jean_claude "$MACHINE4_DIR" pull
+
+    # Verify machine4 has received all the content created by other machines
+    # Check for files from earlier 3-machine tests (skills files from convergence test)
+    local late_joiner_success=true
+
+    # Check for skills files that were created in previous tests
+    if [ ! -f "$MACHINE4_DIR/.claude/skills/from-m1.md" ]; then
+        late_joiner_success=false
+    fi
+    if [ ! -f "$MACHINE4_DIR/.claude/hooks/m1-hook.sh" ]; then
+        late_joiner_success=false
+    fi
+
+    if [ "$late_joiner_success" = true ]; then
+        print_success "Late joiner (machine4) received all existing content"
+    else
+        print_failure "Late joiner did not receive all content"
+    fi
+}
+
+test_three_machine_status_consistency() {
+    print_test "status command consistency across 3 machines"
+
+    # Get status from all machines
+    status1=$(run_jean_claude "$MACHINE1_DIR" status 2>&1 || true)
+    status2=$(run_jean_claude "$MACHINE2_DIR" status 2>&1 || true)
+    status3=$(run_jean_claude "$MACHINE3_DIR" status 2>&1 || true)
+
+    # All should report some form of status without errors
+    local all_status_ok=true
+    for status_output in "$status1" "$status2" "$status3"; do
+        if echo "$status_output" | grep -qi "error"; then
+            all_status_ok=false
+        fi
+    done
+
+    if [ "$all_status_ok" = true ]; then
+        print_success "Status command works consistently across 3 machines"
+    else
+        print_failure "Status command reported errors on some machines"
+    fi
+}
+
 # Test edge cases
 test_empty_hooks_directory() {
     print_test "empty hooks directory"
@@ -674,6 +985,17 @@ run_all_tests() {
 
     print_header "Testing sync scenarios"
     test_bidirectional_sync
+
+    print_header "Testing multi-repo sync (3 machines)"
+    test_three_machine_init
+    test_three_machine_chain_sync
+    test_three_machine_convergence
+    test_three_machine_sequential_modifications
+    test_three_machine_concurrent_different_files
+    test_three_machine_hooks_sync
+    test_three_machine_skills_sync
+    test_three_machine_late_joiner
+    test_three_machine_status_consistency
 
     print_header "Testing edge cases"
     test_empty_hooks_directory
