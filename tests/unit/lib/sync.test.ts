@@ -172,6 +172,91 @@ describe('sync.ts', () => {
     });
   });
 
+  describe('syncFromClaudeConfig with file references', () => {
+    it('should extract file references from settings.json and copy referenced files', async () => {
+      // Use real home directory for this test since expandPath uses os.homedir()
+      const home = os.homedir();
+      const claudeDir = path.join(home, '.claude');
+      const jeanClaudeDir = path.join(tempDir, '.jean-claude');
+      const testScript = path.join(claudeDir, 'test-statusline-temp.sh');
+
+      await fs.ensureDir(claudeDir);
+      await fs.ensureDir(jeanClaudeDir);
+
+      // Create a temp script file in real claude dir
+      await fs.writeFile(testScript, '#!/bin/bash\necho "status"');
+
+      try {
+        // Create settings.json that references the script
+        await fs.writeFile(
+          path.join(claudeDir, 'settings.json'),
+          JSON.stringify({ statusLine: { command: `bash ~/.claude/test-statusline-temp.sh` } })
+        );
+
+        await syncFromClaudeConfig(claudeDir, jeanClaudeDir);
+
+        // Script should be copied to scripts/
+        expect(await fs.pathExists(path.join(jeanClaudeDir, 'scripts', 'test-statusline-temp.sh'))).toBe(true);
+
+        // Settings should have rewritten path
+        const settings = await fs.readFile(path.join(jeanClaudeDir, 'settings.json'), 'utf-8');
+        expect(settings).toContain('~/.claude/.jean-claude/scripts/test-statusline-temp.sh');
+      } finally {
+        // Clean up
+        await fs.remove(testScript);
+      }
+    });
+
+    it('should preserve nested directory structure for scripts', async () => {
+      const home = os.homedir();
+      const claudeDir = path.join(home, '.claude');
+      const jeanClaudeDir = path.join(tempDir, '.jean-claude');
+      const testDir = path.join(claudeDir, 'test-tools-temp');
+      const testScript = path.join(testDir, 'helper.sh');
+
+      await fs.ensureDir(testDir);
+      await fs.ensureDir(jeanClaudeDir);
+
+      await fs.writeFile(testScript, '#!/bin/bash\necho "help"');
+
+      try {
+        await fs.writeFile(
+          path.join(claudeDir, 'settings.json'),
+          JSON.stringify({ command: 'bash ~/.claude/test-tools-temp/helper.sh' })
+        );
+
+        await syncFromClaudeConfig(claudeDir, jeanClaudeDir);
+
+        expect(await fs.pathExists(path.join(jeanClaudeDir, 'scripts', 'test-tools-temp', 'helper.sh'))).toBe(true);
+
+        const settings = await fs.readFile(path.join(jeanClaudeDir, 'settings.json'), 'utf-8');
+        expect(settings).toContain('~/.claude/.jean-claude/scripts/test-tools-temp/helper.sh');
+      } finally {
+        await fs.remove(testDir);
+      }
+    });
+
+    it('should handle missing referenced files gracefully', async () => {
+      const claudeDir = path.join(tempDir, '.claude');
+      const jeanClaudeDir = path.join(tempDir, '.jean-claude');
+
+      await fs.ensureDir(claudeDir);
+      await fs.ensureDir(jeanClaudeDir);
+
+      // Create settings.json that references a non-existent script
+      await fs.writeFile(
+        path.join(claudeDir, 'settings.json'),
+        JSON.stringify({ command: 'bash ~/.claude/nonexistent.sh' })
+      );
+
+      // Should not throw
+      await syncFromClaudeConfig(claudeDir, jeanClaudeDir);
+
+      // Settings should still be copied (with rewritten path)
+      expect(await fs.pathExists(path.join(jeanClaudeDir, 'settings.json'))).toBe(true);
+    });
+  });
+
   describe('syncToClaudeConfig', () => {
     it('should copy files from jean-claude repo to Claude config', async () => {
       const claudeDir = path.join(tempDir, '.claude');

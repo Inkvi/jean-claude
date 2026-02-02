@@ -2,8 +2,13 @@ import fs from 'fs-extra';
 import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
-import type { FileMapping, SyncResult, MetaJson } from '../types/index.js';
+import type { FileMapping, SyncResult, MetaJson, ExtractedFileRef } from '../types/index.js';
 import { getConfigPaths } from './paths.js';
+import {
+  extractFileReferences,
+  rewritePathsForRepo,
+  expandPath,
+} from './settings-parser.js';
 
 export const FILE_MAPPINGS: FileMapping[] = [
   {
@@ -24,6 +29,11 @@ export const FILE_MAPPINGS: FileMapping[] = [
   {
     source: 'skills',
     target: 'skills',
+    type: 'directory',
+  },
+  {
+    source: 'scripts',
+    target: 'scripts',
     type: 'directory',
   },
 ];
@@ -98,7 +108,27 @@ export async function syncToClaudeConfig(
     await fs.ensureDir(claudeConfigDir);
   }
 
+  // Scripts stay in jeanClaudeDir (paths in settings.json point to ~/.claude/.jean-claude/scripts/)
+  // Just ensure the scripts directory exists in jeanClaudeDir
+  const scriptsSourcePath = path.join(jeanClaudeDir, 'scripts');
+  if (fs.existsSync(scriptsSourcePath)) {
+    const files = await listFilesRecursive(scriptsSourcePath);
+    for (const file of files) {
+      results.push({
+        file: `scripts/${file}`,
+        action: 'updated',
+        source: path.join(scriptsSourcePath, file),
+        target: path.join(scriptsSourcePath, file), // stays in place
+      });
+    }
+  }
+
   for (const mapping of FILE_MAPPINGS) {
+    // Skip scripts - they stay in jeanClaudeDir, already handled above
+    if (mapping.source === 'scripts') {
+      continue;
+    }
+
     const sourcePath = path.join(jeanClaudeDir, mapping.source);
     const targetPath = path.join(claudeConfigDir, mapping.target);
 
@@ -151,7 +181,50 @@ export async function importFromClaudeConfig(
 ): Promise<SyncResult[]> {
   const results: SyncResult[] = [];
 
+  // First, handle settings.json specially to extract file references
+  const settingsSourcePath = path.join(claudeConfigDir, 'settings.json');
+  let extractedRefs: ExtractedFileRef[] = [];
+
+  if (fs.existsSync(settingsSourcePath)) {
+    try {
+      const settingsContent = await fs.readFile(settingsSourcePath, 'utf-8');
+      extractedRefs = extractFileReferences(settingsContent);
+
+      // Copy referenced files to scripts/ directory
+      if (extractedRefs.length > 0) {
+        const scriptsDir = path.join(jeanClaudeDir, 'scripts');
+        await fs.ensureDir(scriptsDir);
+
+        for (const ref of extractedRefs) {
+          const sourceFile = expandPath(ref.originalPath);
+          const targetFile = path.join(scriptsDir, ref.relativePath);
+
+          if (fs.existsSync(sourceFile)) {
+            await fs.ensureDir(path.dirname(targetFile));
+            await fs.copy(sourceFile, targetFile);
+            results.push({
+              file: `scripts/${ref.relativePath}`,
+              action: 'copied',
+              source: sourceFile,
+              target: targetFile,
+            });
+          } else {
+            console.warn(`Warning: Referenced file not found: ${ref.originalPath}`);
+          }
+        }
+      }
+    } catch {
+      // If settings.json is malformed, we'll copy it as-is below
+      extractedRefs = [];
+    }
+  }
+
   for (const mapping of FILE_MAPPINGS) {
+    // Skip scripts directory - we handle it above
+    if (mapping.source === 'scripts') {
+      continue;
+    }
+
     const sourcePath = path.join(claudeConfigDir, mapping.target);
     const targetPath = path.join(jeanClaudeDir, mapping.source);
 
@@ -163,6 +236,11 @@ export async function importFromClaudeConfig(
 
     if (mapping.type === 'directory') {
       await fs.copy(sourcePath, targetPath, { overwrite: true });
+    } else if (mapping.source === 'settings.json' && extractedRefs.length > 0) {
+      // Rewrite settings.json paths for portability
+      const settingsContent = await fs.readFile(sourcePath, 'utf-8');
+      const rewrittenContent = rewritePathsForRepo(settingsContent, extractedRefs);
+      await fs.writeFile(targetPath, rewrittenContent, 'utf-8');
     } else {
       await fs.copy(sourcePath, targetPath);
     }
@@ -184,7 +262,50 @@ export async function syncFromClaudeConfig(
 ): Promise<SyncResult[]> {
   const results: SyncResult[] = [];
 
+  // First, handle settings.json specially to extract file references
+  const settingsSourcePath = path.join(claudeConfigDir, 'settings.json');
+  let extractedRefs: ExtractedFileRef[] = [];
+
+  if (fs.existsSync(settingsSourcePath)) {
+    try {
+      const settingsContent = await fs.readFile(settingsSourcePath, 'utf-8');
+      extractedRefs = extractFileReferences(settingsContent);
+
+      // Copy referenced files to scripts/ directory
+      if (extractedRefs.length > 0) {
+        const scriptsDir = path.join(jeanClaudeDir, 'scripts');
+        await fs.ensureDir(scriptsDir);
+
+        for (const ref of extractedRefs) {
+          const sourceFile = expandPath(ref.originalPath);
+          const targetFile = path.join(scriptsDir, ref.relativePath);
+
+          if (fs.existsSync(sourceFile)) {
+            await fs.ensureDir(path.dirname(targetFile));
+            await fs.copy(sourceFile, targetFile);
+            results.push({
+              file: `scripts/${ref.relativePath}`,
+              action: 'copied',
+              source: sourceFile,
+              target: targetFile,
+            });
+          } else {
+            console.warn(`Warning: Referenced file not found: ${ref.originalPath}`);
+          }
+        }
+      }
+    } catch {
+      // If settings.json is malformed, we'll copy it as-is below
+      extractedRefs = [];
+    }
+  }
+
   for (const mapping of FILE_MAPPINGS) {
+    // Skip scripts directory - we handle it above
+    if (mapping.source === 'scripts') {
+      continue;
+    }
+
     const sourcePath = path.join(claudeConfigDir, mapping.target);
     const targetPath = path.join(jeanClaudeDir, mapping.source);
 
@@ -217,6 +338,11 @@ export async function syncFromClaudeConfig(
         await fs.remove(targetPath);
       }
       await fs.copy(sourcePath, targetPath);
+    } else if (mapping.source === 'settings.json' && extractedRefs.length > 0) {
+      // Rewrite settings.json paths for portability
+      const settingsContent = await fs.readFile(sourcePath, 'utf-8');
+      const rewrittenContent = rewritePathsForRepo(settingsContent, extractedRefs);
+      await fs.writeFile(targetPath, rewrittenContent, 'utf-8');
     } else {
       await fs.copy(sourcePath, targetPath);
     }

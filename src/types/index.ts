@@ -67,3 +67,18 @@ export interface DoctorCheck {
   message: string;
   suggestion?: string;
 }
+
+export interface ExtractedFileRef {
+  originalPath: string;
+  expandedPath: string;
+  filename: string;
+  relativePath: string;
+}
+
+export interface SettingsJson {
+  statusLine?: {
+    type?: string;
+    command?: string;
+  };
+  [key: string]: unknown;
+}
