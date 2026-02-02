@@ -1,13 +1,13 @@
 {
-  "name": "jean-claude",
-  "version": "1.3.1",
+  "name": "@inkvi/jean-claude",
+  "version": "1.4.0",
   "description": "Sync Claude Code configuration across machines using Git",
   "author": "Mike Veerman",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MikeVeerman/jean-claude"
+    "url": "https://github.com/Inkvi/jean-claude"
   },
-  "homepage": "https://github.com/MikeVeerman/jean-claude#readme",
+  "homepage": "https://github.com/Inkvi/jean-claude#readme",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
