@@ -11,6 +11,18 @@ import {
 import { JeanClaudeError, ErrorCode } from '../types/index.js';
 import { printLogo } from '../utils/logo.js';
 
+// Validates git repository URL format (SSH, HTTPS, git protocol, or local path)
+function isValidGitUrl(url: string): boolean {
+  const patterns = [
+    /^git@[\w.-]+:[\w./-]+(?:\.git)?$/,              // SSH: git@github.com:user/repo.git
+    /^https?:\/\/[\w.-]+\/[\w./-]+(?:\.git)?$/,      // HTTPS: https://github.com/user/repo.git
+    /^git:\/\/[\w.-]+\/[\w./-]+(?:\.git)?$/,         // Git protocol: git://github.com/user/repo.git
+    /^file:\/\/[\w./-]+$/,                           // File URL: file:///path/to/repo
+    /^\/[\w./-]+$/,                                  // Absolute local path: /path/to/repo
+  ];
+  return patterns.some((pattern) => pattern.test(url));
+}
+
 export const initCommand = new Command('init')
   .description('Initialize Jean-Claude on this machine')
   .action(async () => {
@@ -42,6 +54,15 @@ export const initCommand = new Command('init')
 
     // Get repository URL
     const repoUrl = await input('Repository URL:');
+
+    // Validate URL format
+    if (!isValidGitUrl(repoUrl)) {
+      throw new JeanClaudeError(
+        'Invalid repository URL format',
+        ErrorCode.INVALID_INPUT,
+        'Use SSH (git@host:user/repo.git), HTTPS (https://host/user/repo.git), or git:// URLs.'
+      );
+    }
 
     // Test connection to remote
     logger.step(1, 3, 'Testing connection to repository...');

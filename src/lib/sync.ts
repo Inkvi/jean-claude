@@ -33,7 +33,7 @@ function fileHash(filePath: string): string | null {
     return null;
   }
   const content = fs.readFileSync(filePath);
-  return crypto.createHash('md5').update(content).digest('hex');
+  return crypto.createHash('sha256').update(content).digest('hex');
 }
 
 export function compareFiles(
@@ -236,7 +236,7 @@ export function createMetaJson(claudeConfigPath: string): MetaJson {
   const { platform } = getConfigPaths();
   const hostname = os.hostname();
   const machineId = crypto
-    .createHash('md5')
+    .createHash('sha256')
     .update(hostname + platform)
     .digest('hex')
     .slice(0, 8);

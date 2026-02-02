@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import fs from 'fs-extra';
 import os from 'os';
+import crypto from 'crypto';
 import chalk from 'chalk';
 import { logger, formatPath } from '../utils/logger.js';
 import { getConfigPaths } from '../lib/paths.js';
@@ -10,8 +11,9 @@ import { JeanClaudeError, ErrorCode } from '../types/index.js';
 
 function generateCommitMessage(): string {
   const hostname = os.hostname();
+  const machineId = crypto.createHash('sha256').update(hostname).digest('hex').slice(0, 8);
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  return `Update from ${hostname} at ${timestamp}`;
+  return `Update from ${machineId} at ${timestamp}`;
 }
 
 export const pushCommand = new Command('push')
